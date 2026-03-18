@@ -1,0 +1,10 @@
+{
+  "placeholderImages": [
+    {
+      "id": "initial-chart",
+      "description": "Placeholder chart before user upload",
+      "imageUrl": "https://picsum.photos/seed/chart/1200/800",
+      "imageHint": "chart graph"
+    }
+  ]
+}

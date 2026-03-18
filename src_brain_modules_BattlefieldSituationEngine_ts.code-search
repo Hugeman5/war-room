@@ -1,0 +1,14 @@
+# Query: src/brain/modules/BattlefieldSituationEngine.ts
+# ContextLines: 1
+
+let marketState = 'Ranging';
+
+if (marketStructure?.trend === 'bullish') {
+  marketState = 'Trending Up';
+}
+
+if (marketStructure?.trend === 'bearish') {
+  marketState = 'Trending Down';
+}
+
+const volatility = marketRegime?.volatilityState ?? 'NORMAL';

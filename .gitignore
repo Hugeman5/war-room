@@ -1,0 +1,9 @@
+node_modules
+.next
+.firebase
+.env
+.env.local
+dist
+dist-scripts
+logs
+*.zip
