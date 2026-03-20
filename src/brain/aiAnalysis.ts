@@ -1,19 +1,19 @@
-
 import { openai } from "@/lib/openai";
 import { z } from 'zod';
 import { AIBiasOutputSchema } from "@/intelligence/schemas";
 import type { AIBiasOutput } from "@/intelligence/schemas";
-
 
 export async function getAIAnalysis(input: {
   features: any;
   news?: string[];
 }): Promise<AIBiasOutput | null> {
   if (!openai) {
-    // Silently return null if the AI is not configured. 
-    // A warning is already printed during initialization.
     return null;
   }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 5000);
+
   try {
     const prompt = `
 You are a trading assistant.
@@ -38,19 +38,20 @@ ${input.news?.join("\n") || "None"}
 `;
 
     const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini", // fast + cheap
+      model: "gpt-4o-mini",
       messages: [
         { role: "system", content: "You are a professional trading analyst that only responds with valid JSON." },
         { role: "user", content: prompt },
       ],
       temperature: 0.2,
       response_format: { type: "json_object" },
-    });
+    }, { signal: controller.signal });
+
+    clearTimeout(timeoutId);
 
     const content = response.choices[0]?.message?.content;
     
     if (!content) {
-        console.error("AI returned empty content.");
         return null;
     }
     
@@ -58,7 +59,8 @@ ${input.news?.join("\n") || "None"}
     return result;
 
   } catch (err) {
-    console.error("AI error:", err);
-    return null; // NEVER break system
+    clearTimeout(timeoutId);
+    console.error("AI error / Timeout:", (err as Error).message);
+    return null; 
   }
 }

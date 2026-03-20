@@ -18,16 +18,17 @@ type LiquidationOrder = {
 };
 
 async function fetchLiquidationOrders(): Promise<LiquidationOrder[]> {
-    const url = `https://fapi.binance.com/fapi/v1/allForceOrders?symbol=BTCUSDT&limit=100`;
+    // Handling 400 error that flags on some endpoints due to geo-blocking or param changes
+    const url = `https://fapi.binance.com/fapi/v1/allForceOrders?symbol=BTCUSDT`;
      try {
         const response = await fetch(url);
         if (!response.ok) {
-            console.error(`[LiquidationsCollector] Binance liquidations API error: ${response.status}`);
+            console.warn(`[LiquidationsCollector] API error ${response.status}. Fallback: Engine will ignore liquidation pressure for now.`);
             return [];
         }
         return await response.json();
     } catch (err) {
-        console.error("[LiquidationsCollector] Fetch error:", err);
+        console.warn("[LiquidationsCollector] Fetch error (Possible block/timeout):", err);
         return [];
     }
 }

@@ -11,36 +11,46 @@ import type { FullSnapshot } from "@/intelligence/schemas";
 import type { FeatureVector } from "@/types/market";
 import { normalizeBias } from "./normalizeBias";
 import { shouldTrade } from "./tradeFilter";
+import type { AIBiasOutput } from "@/intelligence/schemas";
 
-/**
- * Runs the entire intelligence pipeline from data fetching to final strategy assembly.
- * This is the main orchestrator for the server-side intelligence generation.
- */
+let latestNewsScore = 0;
+let latestAI: AIBiasOutput | null = null;
+let backgroundTaskInterval: NodeJS.Timeout | null = null;
+
+export function startBackgroundTasks() {
+    if (backgroundTaskInterval) return;
+    
+    const updateBackgroundContext = async () => {
+        try {
+            const headlines = await fetchNews().catch(() => []);
+            latestNewsScore = scoreNewsSentiment(headlines);
+
+            if (canCallAI()) {
+                const dummyFeatures = await buildFeatureVector().catch(() => ({}));
+                latestAI = await getAIAnalysis({
+                    features: dummyFeatures,
+                    news: headlines,
+                });
+            }
+        } catch (err) {
+            console.error("Background task error:", err);
+        }
+    };
+
+    updateBackgroundContext();
+    backgroundTaskInterval = setInterval(updateBackgroundContext, 10000);
+}
+
 export async function runFullDecision(features?: FeatureVector): Promise<FullSnapshot> {
-    console.log("PIPELINE STARTED (Full Final Form)");
     const pipelineStartTime = performance.now();
 
     try {
         const pFeatures: FeatureVector = features ?? await buildFeatureVector();
 
-        // Run Quant Layer
         const quant = await runAlphaLayer();
+        const newsScore = latestNewsScore;
+        const ai = latestAI;
         
-        // NEWS (always available)
-        const headlines = await fetchNews();
-        const newsScore = scoreNewsSentiment(headlines);
-
-        // AI (optional)
-        let ai = null;
-        if (canCallAI()) {
-            console.log("Running AI analysis (getAIAnalysis)...");
-            ai = await getAIAnalysis({
-                features: pFeatures,
-                news: headlines,
-            });
-        }
-        
-        // Compute Fused Confidence
         const finalConfidence = computeConfidence(
             pFeatures,
             quant.alphaScore,
@@ -48,10 +58,8 @@ export async function runFullDecision(features?: FeatureVector): Promise<FullSna
             ai?.confidence
         );
 
-        // Determine Final Bias
         const quantBiasForNotes = quant.alphaScore > 0.1 ? 'Bullish' : quant.alphaScore < -0.1 ? 'Bearish' : 'Neutral';
-        const quantBias = quant.alphaScore > 0.1 ? 'LONG' : quant.alphaScore < -0.1 ? 'SHORT' : 'Neutral';
-        let finalBias: 'LONG' | 'SHORT' | 'Neutral' = quantBias;
+        let finalBias: 'LONG' | 'SHORT' | 'Neutral' = quant.alphaScore > 0.1 ? 'LONG' : quant.alphaScore < -0.1 ? 'SHORT' : 'Neutral';
 
         if (ai && ai.confidence > 0.65) {
             if (ai.tradeDirection === 'HOLD') {
@@ -61,14 +69,13 @@ export async function runFullDecision(features?: FeatureVector): Promise<FullSna
             }
         }
         
-        // Apply trade filter
         let strategyNotes = ai ? ai.reasoning : `Quant-driven signal. Bias: ${quantBiasForNotes}. Alpha Score: ${quant.alphaScore.toFixed(2)}.`;
         if (!shouldTrade(finalConfidence)) {
             finalBias = 'Neutral';
             strategyNotes = `No trade signal. Confidence ${Math.round(finalConfidence * 100)}% is below the 60% threshold.`
         }
         
-        const normalizedFinalBias = normalizeBias(finalBias);
+        const normalizedFinalBias = normalizeBias(finalBias) || 'Neutral';
 
         const resultForLogging = {
             bias: normalizedFinalBias,
@@ -81,8 +88,7 @@ export async function runFullDecision(features?: FeatureVector): Promise<FullSna
         console.log(JSON.stringify(resultForLogging, null, 2));
         console.log("--------------------------");
 
-        // Create a basic snapshot for the UI from the test results
-        const fullSnapshot: FullSnapshot = {
+        return {
              timestamp: Date.now(),
              strategy: {
                  bias: normalizedFinalBias,
@@ -105,13 +111,11 @@ export async function runFullDecision(features?: FeatureVector): Promise<FullSna
              engineLatencies: {
                  pipelineTotal: performance.now() - pipelineStartTime,
              }
-        }
-        return fullSnapshot;
+        };
 
     } catch (err) {
         console.error("DECISION PIPELINE FAILURE", err);
-        // Fallback in case of any failure
-        const fullSnapshot: FullSnapshot = {
+        return {
              timestamp: Date.now(),
              strategy: {
                  bias: 'Neutral',
@@ -129,7 +133,6 @@ export async function runFullDecision(features?: FeatureVector): Promise<FullSna
              engineLatencies: {
                  pipelineTotal: performance.now() - pipelineStartTime,
              }
-        }
-        return fullSnapshot;
+        } as FullSnapshot;
     }
 }
